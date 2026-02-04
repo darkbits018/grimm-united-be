@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import JSONB
 import os
 import json
+import httpx
 from dotenv import load_dotenv
 
 # Environment variables will be loaded below using the absolute path
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
     MAIL_SERVER: str
     MAIL_FROM_NAME: str
     DATABASE_URL: Optional[str] = None
+    RENDER_EXTERNAL_URL: Optional[str] = None
     
     # Values will be read from the environment (populated by load_dotenv)
     model_config = SettingsConfigDict(extra="ignore")
@@ -79,7 +81,12 @@ SessionLocal = None
 
 if settings and settings.DATABASE_URL:
     try:
-        engine = create_engine(settings.DATABASE_URL)
+        # Render provides postgres:// urls, but SQLAlchemy requires postgresql://
+        db_url = settings.DATABASE_URL
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+            
+        engine = create_engine(db_url)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         Base.metadata.create_all(bind=engine)
         print("Success: Connected to PostgreSQL database")
@@ -97,9 +104,26 @@ async def simulate_growth():
         if os.path.exists(COUNTER_FILE):
              update_stats()
 
+# Background task to keep the app awake on Render
+async def keep_alive():
+    if not settings or not settings.RENDER_EXTERNAL_URL:
+        print("Keep-alive disabled: RENDER_EXTERNAL_URL not set")
+        return
+        
+    print(f"Keep-alive active: Pinging {settings.RENDER_EXTERNAL_URL}")
+    while True:
+        await asyncio.sleep(600) # Ping every 10 minutes
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(settings.RENDER_EXTERNAL_URL)
+                print(f"Self-ping status: {response.status_code}")
+        except Exception as e:
+            print(f"Self-ping failed: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(simulate_growth())
+    asyncio.create_task(keep_alive())
 
 # Allow frontend to communicate with backend
 app.add_middleware(
