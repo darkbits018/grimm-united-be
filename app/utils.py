@@ -80,8 +80,8 @@ async def send_email(to: str, subject: str, html: str):
             port=settings.MAIL_PORT,
             username=settings.MAIL_USERNAME,
             password=settings.MAIL_PASSWORD,
-            use_tls=False,
-            start_tls=True if settings.MAIL_PORT == 587 else False,
+            use_tls=settings.MAIL_PORT == 465,
+            start_tls=settings.MAIL_PORT == 587,
         )
     except Exception as e:
         print(f"Email send failed to {to}: {e}")
