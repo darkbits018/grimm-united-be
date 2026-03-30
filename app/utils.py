@@ -68,6 +68,11 @@ def order_to_dict(o: Order) -> dict:
 async def send_email(to: str, subject: str, html: str):
     if not settings:
         return
+    import asyncio
+    asyncio.create_task(_send_email_task(to, subject, html))
+
+
+async def _send_email_task(to: str, subject: str, html: str):
     message = MIMEMultipart()
     message["From"] = f"{settings.MAIL_FROM_NAME} <{settings.MAIL_FROM}>"
     message["To"] = to
@@ -82,6 +87,7 @@ async def send_email(to: str, subject: str, html: str):
             password=settings.MAIL_PASSWORD,
             use_tls=settings.MAIL_PORT == 465,
             start_tls=settings.MAIL_PORT == 587,
+            timeout=10,
         )
     except Exception as e:
         print(f"Email send failed to {to}: {e}")
