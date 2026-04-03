@@ -54,9 +54,9 @@ async def push_order_to_qikink(order, items_with_products: list) -> dict:
                 "search_from_my_products": 1,
                 "client_product_id": product.qikink_client_product_id,
                 "size_id": size_id,
-                "color_id": product.qikink_color_id or "2",  # default Black
+                "color_id": product.qikink_color_id or "2",
                 "quantity": str(oi.quantity),
-                "price": str(oi.unit_price),
+                "price": "0",  # Qikink bills us separately via wallet; this is informational only
             })
         elif product.qikink_sku and product.qikink_design_code:
             # Fallback: SKU + inline design
@@ -124,3 +124,90 @@ async def get_qikink_order(qikink_order_id: str) -> dict:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+import csv
+import io
+
+# Qikink color_id → color name (for the CSV Style/Color columns)
+COLOR_NAME_MAP = {
+    "1": "White", "2": "Black", "3": "Navy Blue", "4": "Red",
+    "5": "Green", "6": "Orange", "7": "Yellow", "8": "Grey",
+    "9": "Royal Blue", "25": "Maroon", "26": "Purple",
+}
+
+PRINT_TYPE_MAP = {
+    1: "DTG", 17: "DTF", 2: "All Over Print", 3: "Embroidery", 5: "Accessories",
+}
+
+# Qikink bulk upload CSV columns (row 2 of their template)
+BULK_CSV_HEADERS = [
+    "Order No.", "Gender", "Style", "Color", "Size", "Qty.",
+    "First Design Name", "First Design Code", "First Design URL",
+    "First Placement", "First Design Width in Inch", "First Design Height in inch",
+    "Product Selling Price", "Payment Mode", "Invoice value", "Courier Type",
+    "Delivery State", "Delivery City", "Delivery pincode (6 digits)",
+    "Delivery Customer name", "Delivery Contact Number",
+    "Delivery Address Line-1 (60 Characters)", "Delivery Address Line-2 (60 characters)",
+    "Second Design Name", "Second Design Code", "Second Design URL",
+    "Second Design Placement", "Second Design Width in Inch", "Second Design Height in inch",
+    "Mockup URL", "Print type",
+]
+
+
+def build_qikink_csv(orders_with_items: list) -> str:
+    """
+    Build a Qikink bulk upload CSV string from a list of (order, [(order_item, product)]) tuples.
+    One row per line item.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(BULK_CSV_HEADERS)
+
+    for order, items_with_products in orders_with_items:
+        import json
+        addr = json.loads(order.shipping_address or "{}")
+        address_line1 = addr.get("line1", "")[:60]
+        address_line2 = addr.get("line2", "")[:60]
+        state = addr.get("state", "")
+        city = addr.get("city", "")
+        pincode = addr.get("pincode", "")
+
+        for oi, product in items_with_products:
+            if not product:
+                continue
+            color_name = COLOR_NAME_MAP.get(product.qikink_color_id or "", product.qikink_color_id or "")
+            print_type = PRINT_TYPE_MAP.get(product.qikink_print_type_id or 1, "DTG")
+            # Determine style (T-shirt / Hoodie etc.) from product category
+            style = product.category or "T-Shirt"
+
+            writer.writerow([
+                order.id[:15],          # Order No.
+                "Unisex",               # Gender
+                style,                  # Style
+                color_name,             # Color
+                oi.size,                # Size
+                oi.quantity,            # Qty
+                product.name,           # First Design Name
+                product.qikink_design_code or "",   # First Design Code
+                product.qikink_design_url or "",    # First Design URL
+                "fr",                   # First Placement (front)
+                "",                     # First Design Width
+                "",                     # First Design Height
+                oi.unit_price,          # Product Selling Price
+                "Prepaid",              # Payment Mode
+                order.total,            # Invoice value
+                "1",                    # Courier Type (1 = Qikink courier)
+                state,
+                city,
+                pincode,
+                order.customer_name,
+                order.phone or "",
+                address_line1,
+                address_line2,
+                "", "", "", "", "", "",  # Second design (empty)
+                product.qikink_mockup_url or oi.image or "",  # Mockup URL
+                print_type,
+            ])
+
+    return output.getvalue()

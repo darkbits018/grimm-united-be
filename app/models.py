@@ -65,6 +65,7 @@ class Order(Base):
     coupon_code = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     qikink_order_id = Column(String(100), nullable=True)  # Qikink's internal order_id after fulfillment push
+    qikink_push_failed = Column(Boolean, default=False)   # True if auto-push failed — needs manual CSV upload
     items = relationship("OrderItem", back_populates="order")
 
 

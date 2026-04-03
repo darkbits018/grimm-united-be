@@ -9,7 +9,7 @@ from app.models import Order, OrderItem, Coupon, Product
 from app.database import SessionLocal
 from app.utils import require_admin, order_to_dict, send_email
 from app.config import settings
-from app.services.qikink import push_order_to_qikink
+from app.services.qikink import push_order_to_qikink, build_qikink_csv
 
 router = APIRouter()
 
@@ -156,6 +156,8 @@ async def verify_payment(data: RazorpayVerify):
             print(f"Qikink order pushed: {qikink_order_id}")
         except Exception as e:
             print(f"Qikink push failed for {order.id}: {e}")
+            order.qikink_push_failed = True
+            db.commit()
 
     db.close()
     await send_email(order.customer_email, f"Order Confirmed — {order.id}", confirmation_html)
@@ -250,3 +252,33 @@ async def push_to_qikink(order_id: str, x_admin_token: str = Header(None)):
     except Exception as e:
         db.close()
         raise HTTPException(status_code=502, detail=f"Qikink push failed: {e}")
+
+
+@router.get("/api/admin/orders/qikink-failed-csv")
+def download_failed_qikink_csv(x_admin_token: str = Header(None)):
+    """Download a Qikink bulk upload CSV for all orders where auto-push failed."""
+    from fastapi.responses import StreamingResponse
+    require_admin(x_admin_token)
+    if not SessionLocal:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    db = SessionLocal()
+    failed_orders = db.query(Order).filter(
+        Order.qikink_push_failed == True,
+        Order.status == "paid",
+    ).all()
+
+    orders_with_items = []
+    for order in failed_orders:
+        items_with_products = []
+        for oi in order.items:
+            product = db.query(Product).filter(Product.id == oi.product_id).first() if oi.product_id else None
+            items_with_products.append((oi, product))
+        orders_with_items.append((order, items_with_products))
+
+    db.close()
+    csv_content = build_qikink_csv(orders_with_items)
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=qikink_bulk_upload.csv"},
+    )

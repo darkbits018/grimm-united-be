@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     QIKINK_CLIENT_ID: Optional[str] = None
     QIKINK_ACCESS_TOKEN: Optional[str] = None
     QIKINK_SANDBOX: bool = True  # flip to False for live
+    # Firebase — use JSON string on Render, file path for local dev
+    FIREBASE_SERVICE_ACCOUNT_JSON: Optional[str] = None
+    FIREBASE_SERVICE_ACCOUNT_PATH: Optional[str] = "./firebase-service-account.json"
     model_config = SettingsConfigDict(extra="ignore")
 
 
